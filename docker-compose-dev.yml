@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  api_server:
+    container_name: ${PROJECT_NAME}_api_server
+    build: services/server
+    restart: always
+    environment:
+      - DB_NAME=${DATABASE_NAME}
+      - DB_PASSWORD=${DATABASE_PASSWORD}
+      - DB_USER=${DATABASE_USER}
+      - SECRET_KEY=${SECRET_KEY}
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_ADMIN_USERNAME}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_ADMIN_PASSWORD}
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_ADMIN_EMAIL}
+      - ALLOWED_HOSTS=localhost,api-server
+    #command: "tail -f /dev/null"
+    #command: "sh -c 'uvicorn pecoret.asgi:application --reload --workers 3 --host 0.0.0.0 --port 8000'"
+    command: "gunicorn --bind 0.0.0.0:8000 pecoret.wsgi "
+    volumes:
+      - ./services/server/backend/app:/code
+      - server-static:/app/static
+    env_file: ".env.dev"
+    depends_on:
+      - db
+    links:
+      - caddy_reverse_proxy:storage.localhost
+
+
+  frontend:
+    container_name: ${PROJECT_NAME}_frontend
+    build: services/frontend
+    environment:
+      VITE_APP_API_URL: api
+    command: "npm run dev -- --host"
+    expose:
+      - 3000
+    depends_on:
+      - api_server
+    volumes:
+      - frontend-static:/static
+
+
+  db:
+    container_name: ${PROJECT_NAME}_database
+    image: bitnami/postgresql:13.3.0
+    restart: always    
+    env_file: ".env.dev"
+    user: root
+    volumes:
+      - ./db_docker:/bitnami/postgresql
+      - ./create-dbs.sql:/docker-entrypoint-initdb.d/create-dbs.sql
+    ports:
+      - 5454:5432 # Remove this on production
+    expose:
+      - 5432
+    environment:
+      - POSTGRES_USERNAME=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      - POSTGRES_DATABASE=${DATABASE_NAME}
+      - POSTGRES_HOST_AUTH_METHOD= "trust"
+
+  redis_server:
+    container_name: ${PROJECT_NAME}_redis_server
+    image: redis:alpine
+    restart: always
+    expose:
+      - 6379
+    env_file: .env
+
+
+  worker:
+    build: services/server
+    entrypoint: python3 manage.py qcluster
+    #command: "tail -f /dev/null"
+    environment:
+      - DB_NAME=${DATABASE_NAME}
+      - DB_PASSWORD=${DATABASE_PASSWORD}
+      - DB_USER=${DATABASE_USER}
+      - SECRET_KEY=${SECRET_KEY}
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_ADMIN_USERNAME}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_ADMIN_PASSWORD}
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_ADMIN_EMAIL}
+      - ALLOWED_HOSTS=api-server,localhost
+    volumes:
+      - ./services/server/backend/app:/code
+    depends_on:
+      - db
+
+
+
+  minio_server:
+    container_name: ${PROJECT_NAME}_minio_server
+    image: minio/minio:latest
+    restart: always
+    volumes:
+      - ./minio/data:/data
+    expose:
+      - 9000
+      - 9091
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER_REDIRECT_URL: http://stash.localhost
+    command: "server /data --console-address ':9090'"    
+
+  caddy_reverse_proxy:
+    container_name: ${PROJECT_NAME}_caddy_reverse_proxy
+    image: caddy:alpine
+    restart: always
+    ports:
+      - 80:80
+      - 8080:8080
+      - 443:443
+    environment:
+      - EXT_ENDPOINT1=${EXT_ENDPOINT1}
+      - LOCAL_1=${LOCAL_1}
+      - LOCAL_2=${LOCAL_2}
+    volumes:
+      - ./caddy/Caddyfile.dev:/etc/caddy/Caddyfile
+      - frontend-static:/frontend/static
+      - caddy_data:/data
+      - caddy_config:/config
+  pgadmin:
+     image: dpage/pgadmin4
+     restart: always
+     environment:
+       PGADMIN_DEFAULT_EMAIL: pgadmin@pgadmin.com
+       PGADMIN_DEFAULT_PASSWORD: pgadmin
+     ports:
+       - "5050:80"
+     volumes:
+       - ./pgadmin/servers.json:/pgadmin4/servers.json # preconfigured servers/connections
+       - ./pgadmin/pgpass:/pgadmin4/pgpass # passwords for the connections in this file
+     depends_on:
+       - db
+volumes:
+  caddy_data:
+  caddy_config:
+  server-static:
+  pg-data:
+  frontend-static:
