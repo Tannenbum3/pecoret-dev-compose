@@ -57,16 +57,16 @@ install:
 	cd backend/app && poetry install && cd ../..
 
 run-dev-build:
-	docker compose -f docker-compose-dev.yml up --build
+	docker compose -f docker-compose-dev.yml up --build -d
 
 run-dev:
-	docker compose -f docker-compose-dev.yml up
+	docker compose -f docker-compose-dev.yml up -d
 
 stop-dev:
 	docker compose -f docker-compose-dev.yml down
 
 run-prod:
-	docker compose up
+	docker compose up -d
 
 stop-prod:
 	docker compose down
